@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JohnChen聚合搜索起始页</title>
+    <meta name="color-scheme" content="light dark" />
+    <!--
+      防闪白脚本必须是同步的普通脚本（不能是 module，否则会 defer）。
+      MV3 CSP 为 script-src 'self'，内联脚本会被拦截；
+      放在 public/ 下按原样拷贝，因此在产物里是同目录的 theme-init.js。
+    -->
+    <script src="./theme-init.js"></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

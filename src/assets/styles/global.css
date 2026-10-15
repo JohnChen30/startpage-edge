@@ -1,0 +1,614 @@
+/* ============================================================
+   起始页全局样式
+   - 所有颜色通过 CSS 变量下发，由 lib/theme.ts 写入 :root
+   - 动画只用 transform / opacity，避免 layout 抖动
+   - 首屏无阻塞：壁纸由 JS 注入，先渲染纯色底
+   ============================================================ */
+
+/* ── 变量默认值（浅色），JS 就绪后覆盖 ── */
+:root {
+  --bg: #f6f7f9;
+  --text: #16181d;
+  --text-secondary: rgba(22, 24, 29, 0.52);
+  --accent: #2f6bff;
+  --line: rgba(22, 24, 29, 0.26);
+  --line-highlight: rgba(255, 255, 255, 0.95);
+  --shadow: rgba(22, 24, 29, 0.16);
+  --glass-bg: rgba(255, 255, 255, 0.66);
+  --glass-border: rgba(255, 255, 255, 0.85);
+  /* 比主体玻璃更实一档 —— 供需要压住下层内容的浮层（下拉、弹窗）使用 */
+  --glass-bg-strong: rgba(255, 255, 255, 0.9);
+  /* 搜索卡片的玻璃面：浅色模式用半透明白打底 */
+  --glass-surface: rgba(255, 255, 255, 0.62);
+  /* 玻璃材质的高光边色 —— 深色下压暗、浅色下提亮，
+     供搜索框立体线条的「受光面 / 毛玻璃过渡」复用 */
+  --flex-edge: rgba(255, 255, 255, 0.98);
+  /* 毛玻璃过渡层的底色 */
+  --glass-frost: rgba(255, 255, 255, 0.14);
+
+  --wallpaper-blur: 0px;
+  --wallpaper-brightness: 100%;
+  --wallpaper-mask: 0;
+  --shortcut-size: 56px;
+
+  /* 立体线条的几何参数 —— 一处改动全局生效 */
+  --line-width: 1.5px;
+  --line-lift: 3px;
+  --line-ridge: 1px;
+
+  /* 全局圆角缩放：由设置里的「圆角」滑块写入（lib/theme.ts#applyRadiusToRoot）。
+     每个半径变量都乘上它，因此调一处即可统一搜索卡片 /
+     快捷方式 / 毛玻璃浮层 / 按钮等所有圆角。 */
+  --radius-scale: 1;
+  --radius-sm: calc(6px * var(--radius-scale));
+  --radius-md: calc(10px * var(--radius-scale));
+  --radius-lg: calc(16px * var(--radius-scale));
+  --radius-xl: calc(22px * var(--radius-scale));
+  /* 快捷方式图标底板的半径。基准比例 0.24 由 ShortcutGrid 按 --cell 算出，
+     这里给一个与 56px 默认尺寸匹配的兜底值，
+     供 ShortcutLogo 在网格之外（如收藏夹卡片）单独使用时也能正确取到。 */
+  --shortcut-radius: calc(56px * 0.24 * var(--radius-scale));
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+
+  /* ── 统一字体规范 ──
+     全站只用这一个字体栈与这一组字号档位。
+     搜索框、设置面板、收藏夹、快捷方式名字都从 --font-ui / --fs-* 取值，
+     避免各处自己写 font-size 导致「同一套 UI 却有两种字号」。
+     想换字体只改 --font-ui 一处即可。 */
+  --font-ui:
+    'Segoe UI Variable Display', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Microsoft YaHei', 'Hiragino Sans GB', system-ui, sans-serif;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-search: clamp(18px, 2.1vw, 24px);
+
+  /* ── 统一毛玻璃规范（基准 = 快捷方式小方块）──
+     所有玻璃材质共用这一组参数，保证「看起来是同一种材质」。
+     这里写的是**出厂默认值**：运行时由 lib/theme.ts#applyGlassBlurToRoot
+     把设置里的「毛玻璃模糊程度」写成 :root 上的 inline 变量覆盖掉（设置 → 外观）：
+     全站只有 --glass-blur 这一个模糊度 ——
+     搜索卡片、每一个快捷方式小方块、收藏夹弹窗、设置抽屉、搜索下拉
+     取的都是同一个值，拖滑块时一起变，不存在「某一处比别处厚一档」的差别。
+     圆角则走 --radius-scale（同样是 inline 覆盖），两者互不影响。 */
+  --glass-blur: 18px;
+  --glass-saturate: 160%;
+  /* 磨砂的「奶感」：玻璃底色上额外叠的白色百分比，同样由那根滑块派生
+     （见 theme.ts#applyGlassBlurToRoot / defaults.glassMilk）。
+     需要它，是因为 backdrop-filter 只对**有细节**的背景有效：
+     壁纸本身很平的时候（雾气 / 天空 / 大面积虚化），blur 从 0 拉到 40
+     画面几乎不变，滑块看着就像失灵。跟着一起加奶感，任何壁纸都看得出变化。
+     这里写的是出厂值（对应默认 18px）。 */
+  --glass-milk: 9%;
+
+  --z-wallpaper: 0;
+  --z-content: 10;
+  --z-editor: 60;
+  /* 遮罩层：必须夹在「页面内容」与「抽屉/弹窗」之间。
+     注意不能写成 calc(--z-dialog - 10)，那样会得到 90，
+     反过来把 --z-drawer(80) 的设置抽屉盖住 → 整页点不动。
+     这里显式取 70：低于抽屉 80、低于弹窗 100，高于内容与编辑器。 */
+  --z-overlay: 70;
+  --z-drawer: 80;
+  --z-dialog: 100;
+  /* 弹窗内部的嵌套层（例如收藏夹里的「命名」小弹层）——必须高过 --z-dialog，
+     否则会被所属弹窗盖住，导致点不到。 */
+  --z-nested: 140;
+  --z-toast: 120;
+}
+
+/* 深色兜底：JS 未就绪前跟随系统，避免闪白 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #0d0f14;
+    --text: #f2f4f8;
+    --text-secondary: rgba(242, 244, 248, 0.54);
+    --accent: #6f9dff;
+    --line: rgba(242, 244, 248, 0.28);
+    --line-highlight: rgba(255, 255, 255, 0.72);
+    --shadow: rgba(0, 0, 0, 0.55);
+    --glass-bg: rgba(22, 26, 34, 0.68);
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-bg-strong: rgba(22, 26, 34, 0.9);
+    /* 深色模式：玻璃面改用半透明黑打底 */
+    --glass-surface: rgba(14, 16, 21, 0.55);
+    --flex-edge: rgba(255, 255, 255, 0.9);
+    --glass-frost: rgba(255, 255, 255, 0.1);
+  }
+}
+
+/* ── Reset ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  font-family: var(--font-ui);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+
+#app {
+  position: relative;
+  z-index: var(--z-content);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ── 焦点可见性：只在键盘导航时出现，避免鼠标点击时闪框 ── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── 屏幕阅读器专用 ── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── 壁纸层 ── */
+.wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-wallpaper);
+  background-color: var(--bg);
+  background-size: cover;
+  background-position: center;
+  filter: blur(var(--wallpaper-blur)) brightness(var(--wallpaper-brightness));
+  /* 模糊会让边缘透出底色，放大一点点把边缘推出视口 */
+  transform: scale(1.06);
+  transition:
+    filter var(--dur-slow) var(--ease-soft),
+    opacity var(--dur-slow) var(--ease-soft);
+  pointer-events: none;
+  will-change: filter;
+}
+
+.wallpaper--loading {
+  opacity: 0;
+}
+
+.wallpaper-mask {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-wallpaper) + 1);
+  background: var(--bg);
+  opacity: var(--wallpaper-mask);
+  pointer-events: none;
+}
+
+/* ── 毛玻璃通用件（浮层专用）──
+   用在**悬浮于内容之上**的层：收藏夹弹窗、设置抽屉、右键菜单、
+   Toast、搜索建议下拉、设置齿轮 / 壁纸按钮等。
+     背景 --glass-surface（按主题深浅自动切换半透明黑/白）
+     1px --glass-border 描边
+     顶部 inset 高光（--glass-frost）+ 底部 inset 收暗
+     一层外投影（--shadow）
+     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+   圆角用 --radius-xl，因此跟随全局「圆角大小」滑块。
+
+   **页面里的模块不用这个类** —— 搜索卡片与快捷方式小方块要的是
+   「快捷方式图标底板」那种更薄、更亮、更透的材质，定义在下面的 .glass-tile。
+   两者共用同一组 --glass-blur / --glass-milk，所以模糊滑块一次调全部。
+
+   ⚠️ 这里**只能写不带前缀的 backdrop-filter，绝对不要加 -webkit-backdrop-filter**。
+   本项目曾经两行都写，结果构建产物里标准属性被压缩器删掉、只剩前缀版；
+   而实测（真实 Chromium 渲染 + 像素对比）前缀版**完全不生效**，
+   于是全站毛玻璃只剩一层半透明色块，「模糊程度」滑块怎么拖都没反应。
+   原因：Chrome 76 / Edge 79 起就已支持标准属性，前缀早已是多余的，
+   而构建链的 CSS 压缩器会把「相同值的标准属性 + 前缀属性」判定为重复并删掉标准那个。
+   本项目只需要 Edge，删掉前缀即可；`-webkit-line-clamp` 那类仍然必需的前缀不受此影响。 */
+.glass {
+  background: var(--glass-surface);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-radius: var(--radius-xl);
+  box-shadow:
+    inset 0 1px 0 var(--glass-frost),
+    inset 0 -1px 0 color-mix(in srgb, var(--shadow) 28%, transparent),
+    0 12px 36px -18px var(--shadow);
+}
+
+/* 不支持 backdrop-filter 时给个不透明兜底，保证可读性 */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass {
+    background: var(--bg);
+  }
+}
+
+/* ── 页面模块材质：快捷方式那个小方块 ──
+   这是「一块小方块」的**完整配方**，全站只有这一份定义。
+   两个使用者，取的就是同一个类、同一组变量：
+     · ShortcutLogo 的 .logo__base —— 每个快捷方式图标底下那一小块；
+     · App 的 .search-block      —— 搜索卡片（同材质，只是面积大得多）。
+   于是拖「毛玻璃模糊程度」滑块时，搜索卡片与所有快捷方式方块同步变化。
+
+   配方逐项：
+     · 145° 白色渐变（--flex-edge 16% → 4%）。
+       用 --flex-edge（浅色 .98 / 深色 .9，都接近纯白）而不是 --glass-surface
+       （深色下是半透明黑）—— 前者落在壁纸上是**提亮**，后者是压暗。
+     · 最上面再叠一层更淡的白，厚度由 --glass-milk 决定，跟着滑块一起变。
+       需要这层「奶感」：backdrop-filter 只对**有细节**的背景有效，
+       壁纸很平（纯色 / 雾气 / 大片虚化）时 blur 0 与 40 画面几乎一样，
+       滑块看着就像失灵；加了奶感后任何壁纸上都看得出变化。
+     · 1px 发丝描边（--line 34%）+ 顶部一道亮高光 + 一层很浅的外投影。
+     · backdrop-filter: blur(var(--glass-blur)) —— 模糊度同样由那根滑块驱动。
+
+   刻意不用 `color-mix(... calc(16% + var(--glass-milk)) ...)`：
+   color-mix 里的 calc 百分比支持面窄，写坏会导致整条 background 失效。
+   所以改成两层 linear-gradient 叠加 —— 效果等价，但不会整条失效。
+
+   圆角**不在这里写**：小方块要跟 --cell 走（--shortcut-radius），
+   搜索卡片要跟 --radius-xl 走，由各自的使用者自己给。 */
+.glass-tile {
+  background-color: transparent;
+  background-image:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--flex-edge) var(--glass-milk, 9%), transparent),
+      color-mix(in srgb, var(--flex-edge) 4%, transparent)
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--flex-edge) 16%, transparent),
+      color-mix(in srgb, var(--flex-edge) 4%, transparent)
+    );
+  border: 1px solid color-mix(in srgb, var(--line) 34%, transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--flex-edge) 42%, transparent),
+    0 2px 6px -2px var(--shadow);
+}
+
+/* 不支持 backdrop-filter 时给个能压住壁纸的兜底，保证文字可读 */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-tile {
+    background-color: var(--glass-surface);
+    background-image: none;
+  }
+}
+
+/* ── 立体线条 —— 搜索框的核心视觉 ──
+   一条基准线 + 一条上偏移的高光 + 一条下偏移的阴影，
+   三者叠加形成「台阶」一样的立体感。 */
+.baseline {
+  position: relative;
+  height: var(--line-lift);
+}
+
+.baseline::before,
+.baseline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--line-width);
+  border-radius: 999px;
+  transition:
+    opacity var(--dur-base) var(--ease-soft),
+    transform var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-soft);
+}
+
+/* 高光：位于基准线上方，亮度更高 —— 形成受光面 */
+.baseline::before {
+  top: 0;
+  background: var(--line-highlight);
+  opacity: 0.75;
+}
+
+/* 主体：位于下方，颜色更深 —— 形成投影与厚度 */
+.baseline::after {
+  bottom: 0;
+  background: var(--line);
+}
+
+/* 聚焦：高光更亮、整体上抬，像被抬起一档 */
+.baseline[data-focused='true']::before {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+.baseline[data-focused='true']::after {
+  background: linear-gradient(
+    90deg,
+    var(--line) 0%,
+    var(--accent) 50%,
+    var(--line) 100%
+  );
+  transform: translateY(0.5px);
+}
+
+/* ── 滚动条 ── */
+.scroll-area {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.scroll-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-area::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+  background-clip: content-box;
+}
+
+/* ── 通用按钮 ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+  border: 1px solid var(--line);
+  transition:
+    background-color var(--dur-fast) var(--ease-soft),
+    border-color var(--dur-fast) var(--ease-soft),
+    transform var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-soft);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--text-secondary);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn--primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: var(--accent);
+}
+
+.btn--ghost {
+  border-color: transparent;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--glass-bg);
+  border-color: var(--line);
+}
+
+.btn--danger {
+  color: #e5484d;
+  border-color: color-mix(in srgb, #e5484d 40%, transparent);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #e5484d 12%, transparent);
+  border-color: #e5484d;
+}
+
+.btn--icon {
+  width: 34px;
+  padding: 0;
+}
+
+/* ── 表单件 ── */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field__label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.input {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: 1px solid var(--line);
+  transition:
+    border-color var(--dur-fast) var(--ease-soft),
+    box-shadow var(--dur-fast) var(--ease-soft);
+  width: 100%;
+}
+
+.input:hover {
+  border-color: var(--text-secondary);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.input::placeholder {
+  color: var(--text-secondary);
+}
+
+.switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--line);
+  flex: none;
+  transition: background-color var(--dur-base) var(--ease-soft);
+}
+
+.switch[data-on='true'] {
+  background: var(--accent);
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px var(--shadow);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.switch[data-on='true']::after {
+  transform: translateX(16px);
+}
+
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+
+.slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+
+/* ── 遮罩 ──
+   z-index 用 --z-overlay(70)：高于页面内容，低于设置抽屉(80)与弹窗(100)。
+   之前这里写的是 calc(--z-dialog - 10) = 90 > --z-drawer(80)，
+   结果遮罩反压到设置抽屉上，导致「设置页整页点不动」——本次回归的根因。 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: rgba(6, 8, 12, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

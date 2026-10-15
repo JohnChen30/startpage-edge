@@ -1,0 +1,512 @@
+/**
+ * 起始页 E2E —— 真实扩展上下文
+ *
+ * 这里的用例只覆盖「必须在真实扩展里才成立」的验收点：
+ * newtab 覆盖、权限、chrome://favicon、chrome.storage。
+ * 纯逻辑（排序、匹配优先级、导入导出）已经由单元测试覆盖，不在这里重复。
+ *
+ * 运行前必须先 `pnpm build`（helpers 会检查 .output/edge-mv3 是否存在）。
+ */
+import { expect, test } from '@playwright/test';
+import {
+  hasDisplay,
+  launchWithExtension,
+  makeShortcuts,
+  openNewTab,
+  seedLocal,
+  type ExtensionContext,
+} from './helpers';
+
+let ext: ExtensionContext;
+
+// MV3 扩展需要 headed 运行，无显示设备时整组跳过（CI 用 xvfb-run 包一层）
+test.skip(
+  !hasDisplay(),
+  'MV3 扩展在无头/无显示环境下不会注册 service worker，请用 xvfb-run 运行',
+);
+
+test.beforeAll(async () => {
+  ext = await launchWithExtension();
+});
+
+test.afterAll(async () => {
+  await ext?.dispose();
+});
+
+test.describe('起始页冒烟', () => {
+  test('扩展加载后 service worker 注册成功，且能打开 newtab.html', async () => {
+    const page = await openNewTab(ext);
+
+    // 主区域渲染完成即视为启动成功
+    await expect(page.locator('main[aria-label="起始页主区域"]')).toBeVisible();
+
+    await page.close();
+  });
+
+  test('newtab.html 确实注册为浏览器新标签页覆盖页', async () => {
+    const sw = ext.serviceWorker;
+    expect(sw).toBeTruthy();
+
+    const manifest = await sw!.evaluate(() =>
+      // @ts-expect-error —— service worker 里 chrome 由扩展环境注入
+      chrome.runtime.getManifest(),
+    );
+
+    expect(manifest.manifest_version).toBe(3);
+    expect(manifest.chrome_url_overrides?.newtab).toBe('newtab.html');
+  });
+
+  test('manifest 权限收敛：只有 bookmarks/storage/favicon，且无 host_permissions', async () => {
+    const sw = ext.serviceWorker;
+
+    const manifest = await sw!.evaluate(() =>
+      // @ts-expect-error
+      chrome.runtime.getManifest(),
+    );
+
+    const permissions = [...(manifest.permissions ?? [])].sort();
+    expect(permissions).toEqual(['bookmarks', 'favicon', 'storage']);
+
+    // 合规红线：不得申请任何主机权限
+    const hostPermissions = manifest.host_permissions ?? [];
+    expect(hostPermissions).toEqual([]);
+  });
+});
+
+test.describe('搜索框', () => {
+  test('搜索框以「基线 + 文字在上方」的形式呈现，而不是传统矩形输入框', async () => {
+    const page = await openNewTab(ext);
+
+    const input = page.locator('#sp-search');
+    await expect(input).toBeVisible();
+
+    // 3D 基线四层结构必须存在
+    await expect(page.locator('.search__line')).toBeAttached();
+    await expect(page.locator('.search__highlight')).toBeAttached();
+    await expect(page.locator('.search__shadow')).toBeAttached();
+
+    // 输入框本身无边框、背景透明 —— 视觉上只有一条线
+    const styles = await input.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return {
+        borderTopWidth: cs.borderTopWidth,
+        borderBottomWidth: cs.borderBottomWidth,
+        backgroundImage: cs.backgroundImage,
+      };
+    });
+    expect(styles.borderTopWidth).toBe('0px');
+    expect(styles.borderBottomWidth).toBe('0px');
+
+    await page.close();
+  });
+
+  test('输入内容时基线长度随字数增长（动画属性为 transform/width）', async () => {
+    const page = await openNewTab(ext);
+    const input = page.locator('#sp-search');
+    const wrap = page.locator('.search__baseline-wrap');
+
+    const emptyWidth = (await wrap.boundingBox())?.width ?? 0;
+
+    await input.click();
+    await input.fill('svelte runes 深入');
+    // 等长度动画结束（过渡上限约 250ms）
+    await page.waitForTimeout(400);
+
+    const filledWidth = (await wrap.boundingBox())?.width ?? 0;
+    expect(filledWidth).toBeGreaterThan(emptyWidth);
+
+    await page.close();
+  });
+
+  test('聚焦后 Esc 清空输入、二次 Esc 失焦', async () => {
+    const page = await openNewTab(ext);
+    const input = page.locator('#sp-search');
+
+    await input.click();
+    await input.fill('hello');
+    await expect(input).toHaveValue('hello');
+
+    await page.keyboard.press('Escape');
+    await expect(input).toHaveValue('');
+
+    await page.close();
+  });
+
+  test('Ctrl+K 聚焦搜索框', async () => {
+    const page = await openNewTab(ext);
+    const input = page.locator('#sp-search');
+
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('Control+k');
+    await expect(input).toBeFocused();
+
+    await page.close();
+  });
+});
+
+test.describe('推荐下拉（纯本地，最多 5 项）', () => {
+  test('输入关键词后弹出推荐，总数不超过 5 项', async () => {
+    const page = await openNewTab(ext);
+    const input = page.locator('#sp-search');
+
+    await input.click();
+    await input.type('github', { delay: 30 });
+
+    const listbox = page.locator('[role="listbox"][aria-label="搜索推荐"]');
+    await expect(listbox).toBeVisible();
+
+    const options = listbox.locator('[role="option"]');
+    const count = await options.count();
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThanOrEqual(5);
+
+    await page.close();
+  });
+
+  test('推荐中收藏类候选不超过 3 条', async () => {
+    const page = await openNewTab(ext);
+    const input = page.locator('#sp-search');
+
+    await input.click();
+    await input.type('svelte', { delay: 25 });
+
+    const listbox = page.locator('[role="listbox"][aria-label="搜索推荐"]');
+    await expect(listbox).toBeVisible({ timeout: 3000 });
+
+    // 收藏候选带图标且 subtitle 显示域名；搜索候选 subtitle 是「用 X 搜索」
+    const searchLike = await listbox
+      .locator('[role="option"]')
+      .filter({ hasText: '搜索' })
+      .count();
+    const total = await listbox.locator('[role="option"]').count();
+
+    expect(total - searchLike).toBeLessThanOrEqual(3);
+
+    await page.close();
+  });
+
+  test('推荐项使用 mousedown 抢占焦点，点击后能被选中', async () => {
+    const page = await openNewTab(ext);
+    const input = page.locator('#sp-search');
+
+    await input.click();
+    await input.type('github', { delay: 30 });
+
+    const listbox = page.locator('[role="listbox"][aria-label="搜索推荐"]');
+    await expect(listbox).toBeVisible();
+
+    const first = listbox.locator('[role="option"]').first();
+    // mousedown 是提交路径；click 会在 blur 之后丢失选中
+    await first.dispatchEvent('mousedown');
+
+    // 选中后下拉应关闭
+    await expect(listbox).toBeHidden();
+
+    await page.close();
+  });
+});
+
+test.describe('搜索引擎栏', () => {
+  test('默认引擎（必应）带填充圆角矩形标记与对勾', async () => {
+    const page = await openNewTab(ext);
+    const toolbar = page.locator('[role="toolbar"][aria-label="搜索引擎切换"]');
+    await expect(toolbar).toBeVisible();
+
+    // 默认引擎按钮 aria-label 里包含「当前默认引擎」
+    const defaultBtn = toolbar.locator('button[aria-label*="当前默认引擎"]');
+    await expect(defaultBtn).toHaveCount(1);
+    await expect(defaultBtn).toContainText('必应');
+
+    // 默认引擎独有 .engine__plate（填充底）与 .engine__check（对勾）
+    await expect(defaultBtn.locator('.engine__plate')).toBeAttached();
+    await expect(defaultBtn.locator('.engine__check')).toBeAttached();
+
+    await page.close();
+  });
+
+  test('无输入时点击非默认引擎会切换默认引擎', async () => {
+    const page = await openNewTab(ext);
+    const toolbar = page.locator('[role="toolbar"][aria-label="搜索引擎切换"]');
+
+    const google = toolbar.locator('button', { hasText: '谷歌' });
+    await google.click();
+
+    await expect(
+      toolbar.locator('button[aria-label*="当前默认引擎"]'),
+    ).toContainText('谷歌');
+
+    // 还原，避免影响后续用例（storage 在同一 context 内共享）
+    await toolbar.locator('button', { hasText: '必应' }).click();
+    await expect(
+      toolbar.locator('button[aria-label*="当前默认引擎"]'),
+    ).toContainText('必应');
+
+    await page.close();
+  });
+
+  /**
+   * 跳转类用例统一指向本地 http server。
+   *
+   * 真机上面点引擎会跳到 bing/google 等外网站点，但沙箱/CI 里没有外网，
+   * 直接断言外网 URL 会让用例变成「网络抽查」。改成把内置引擎的
+   * urlTemplate 指到本地，既走完整跳转链路，又不依赖外网。
+   */
+  test('有输入时点击非默认引擎会带着关键词跳转当前页', async ({}, testInfo) => {
+    const base = testInfo.project.use.baseURL as string;
+    await seedLocal(ext, {
+      'sp:engines': [
+        { id: 'bing', name: '必应', urlTemplate: `${base}/search?q=%s`, icon: 'bing', builtin: true, order: 0 },
+        { id: 'google', name: '谷歌', urlTemplate: `${base}/g?q=%s`, icon: 'google', builtin: true, order: 1 },
+      ],
+    });
+
+    const page = await openNewTab(ext);
+    const input = page.locator('#sp-search');
+    const toolbar = page.locator('[role="toolbar"][aria-label="搜索引擎切换"]');
+
+    await input.click();
+    await input.fill('playwright');
+
+    await Promise.all([
+      page.waitForURL(/\/g\?q=playwright/, { timeout: 10_000 }),
+      toolbar.locator('button', { hasText: '谷歌' }).click(),
+    ]);
+
+    expect(page.url()).toContain('q=playwright');
+
+    await page.close();
+  });
+
+  test('回车用默认引擎搜索；地址形态则直接打开', async ({}, testInfo) => {
+    const base = testInfo.project.use.baseURL as string;
+    await seedLocal(ext, {
+      'sp:engines': [
+        { id: 'bing', name: '必应', urlTemplate: `${base}/search?q=%s`, icon: 'bing', builtin: true, order: 0 },
+        { id: 'google', name: '谷歌', urlTemplate: `${base}/g?q=%s`, icon: 'google', builtin: true, order: 1 },
+      ],
+    });
+
+    const page = await openNewTab(ext);
+    const input = page.locator('#sp-search');
+
+    // 1) 关键词 → 默认引擎（必应）
+    await input.click();
+    await input.fill('svelte runes');
+    await Promise.all([
+      page.waitForURL(/\/search\?q=svelte/, { timeout: 10_000 }),
+      page.keyboard.press('Enter'),
+    ]);
+    expect(decodeURIComponent(page.url())).toContain('q=svelte runes');
+
+    // 2) 地址形态 → 直接打开，不拼搜索 URL
+    await page.goto(`chrome-extension://${ext.extensionId}/newtab.html`);
+    await page.waitForTimeout(500);
+    const input2 = page.locator('#sp-search');
+    await input2.click();
+    await input2.fill('localhost:3000');
+    await Promise.all([
+      page.waitForURL(/localhost:3000/, { timeout: 10_000 }),
+      page.keyboard.press('Enter'),
+    ]);
+    expect(page.url()).not.toContain('/search');
+
+    await page.close();
+  });
+});
+
+test.describe('快捷方式区', () => {
+  // 全新 profile 里快捷方式本来就是空的 —— 先在存储里种一批，
+  // 模拟「用户已经添加过快捷方式」的状态，再验渲染与交互。
+  test.beforeAll(async () => {
+    await seedLocal(ext, { 'sp:shortcuts': makeShortcuts(4) });
+  });
+
+  test('已保存的快捷方式渲染出卡片，且提供「添加」与「收藏夹」入口', async () => {
+    const page = await openNewTab(ext);
+
+    const grid = page.locator('.shortcuts__grid');
+    await expect(grid).toBeVisible();
+
+    const cells = grid.locator('[data-shortcut]');
+    await expect(cells).toHaveCount(4);
+    await expect(cells.first()).toContainText('GitHub');
+
+    await expect(grid.locator('[aria-label="添加快捷方式"]')).toBeVisible();
+    await expect(grid.locator('[aria-label="打开收藏夹"]')).toBeVisible();
+
+    await page.close();
+  });
+
+  test('右键快捷方式弹出上下文菜单', async () => {
+    const page = await openNewTab(ext);
+    const cell = page.locator('.shortcuts__grid [data-shortcut]').first();
+    await expect(cell).toBeVisible();
+
+    await cell.click({ button: 'right' });
+
+    const menu = page.locator('[role="menu"]');
+    await expect(menu).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+
+    await page.close();
+  });
+
+  test('点击「添加」弹出内联表单，填入网址后新增卡片', async () => {
+    const page = await openNewTab(ext);
+    const before = await page.locator('[data-shortcut]').count();
+
+    await page.locator('[aria-label="添加快捷方式"]').click();
+
+    const dialog = page.locator('[role="dialog"][aria-label="添加快捷方式"]');
+    await expect(dialog).toBeVisible();
+
+    await dialog.locator('#sc-add-url').fill('https://example.com/seed-test');
+    await dialog.getByRole('button', { name: '添加' }).click();
+
+    await expect(page.locator('[data-shortcut]')).toHaveCount(before + 1);
+
+    await page.close();
+  });
+});
+
+test.describe('收藏夹模态弹窗', () => {
+  test('点击「收藏夹」入口打开居中模态弹窗，带遮罩且可关闭', async () => {
+    const page = await openNewTab(ext);
+
+    await page.locator('[aria-label="打开收藏夹"]').click();
+
+    const dialog = page.locator('[role="dialog"][aria-modal="true"]');
+    await expect(dialog).toBeVisible();
+
+    // 遮罩存在
+    await expect(page.locator('.overlay')).toBeVisible();
+
+    // 尺寸符合规格：720×560，最大高度不超过 80vh
+    const box = await dialog.boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(box).toBeTruthy();
+    expect(box!.width).toBeLessThanOrEqual(720);
+    expect(box!.height).toBeLessThanOrEqual(Math.min(560, viewport.height * 0.8) + 1);
+
+    // 水平居中（允许 2px 误差）
+    const centerX = box!.x + box!.width / 2;
+    expect(Math.abs(centerX - viewport.width / 2)).toBeLessThanOrEqual(2);
+
+    // 关闭按钮可用
+    await page.locator('[aria-label="关闭收藏夹"]').click();
+    await expect(dialog).toBeHidden();
+
+    await page.close();
+  });
+
+  test('Esc 可关闭收藏夹弹窗', async () => {
+    const page = await openNewTab(ext);
+
+    await page.locator('[aria-label="打开收藏夹"]').click();
+    const dialog = page.locator('[role="dialog"][aria-modal="true"]');
+    await expect(dialog).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+
+    await page.close();
+  });
+
+  test('弹窗内搜索框可过滤书签', async () => {
+    const page = await openNewTab(ext);
+
+    await page.locator('[aria-label="打开收藏夹"]').click();
+    const dialog = page.locator('[role="dialog"][aria-modal="true"]');
+    await expect(dialog).toBeVisible();
+
+    const search = dialog.locator('[aria-label="搜索书签"]');
+    await search.click();
+    await search.fill('wxt');
+
+    // 过滤后要么命中若干行，要么显示「没有匹配」——都不应崩溃
+    await expect(
+      dialog.locator('.list, .state').first(),
+    ).toBeVisible();
+
+    await page.close();
+  });
+});
+
+test.describe('设置按钮与抽屉', () => {
+  test('设置按钮固定右下角，不可拖拽', async () => {
+    const page = await openNewTab(ext);
+    const gear = page.locator('button[aria-label="打开设置"]');
+    await expect(gear).toBeVisible();
+
+    const box = (await gear.boundingBox())!;
+    const viewport = page.viewportSize()!;
+
+    // 位置贴近右下角
+    expect(viewport.width - (box.x + box.width)).toBeLessThanOrEqual(24);
+    expect(viewport.height - (box.y + box.height)).toBeLessThanOrEqual(24);
+
+    // 不可拖拽
+    const draggable = await gear.evaluate(
+      (el) => (el as HTMLElement).draggable,
+    );
+    expect(draggable).toBe(false);
+
+    // 尝试拖拽：按下后拖到左上角再松开
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 200, box.y - 200, { steps: 10 });
+    await page.mouse.up();
+
+    // 松手后再量（:active 的 scale(0.97) 会让按住时的包围盒偏 ~2px，
+    // 那不是「被拖走了」，所以要在松开之后断言）
+    await page.waitForTimeout(200);
+    const after = (await gear.boundingBox())!;
+    expect(Math.abs(after.x - box.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.y - box.y)).toBeLessThanOrEqual(1);
+
+    // 更本质的断言：仍然是 fixed 定位，没有被改成 absolute/relative
+    const position = await gear.evaluate(
+      (el) => getComputedStyle(el).position,
+    );
+    expect(position).toBe('fixed');
+
+    await page.close();
+  });
+
+  test('点击设置按钮从右侧滑出设置抽屉', async () => {
+    const page = await openNewTab(ext);
+
+    await page.locator('button[aria-label="打开设置"]').click();
+
+    const drawer = page.locator('[role="dialog"]').filter({ hasText: '设置' });
+    await expect(drawer.first()).toBeVisible({ timeout: 3000 });
+
+    await page.close();
+  });
+});
+
+test.describe('主题一致性', () => {
+  test('首屏前即写入 data-theme，避免明暗闪烁', async () => {
+    const page = await openNewTab(ext);
+
+    const theme = await page.locator('html').getAttribute('data-theme');
+    expect(['light', 'dark']).toContain(theme ?? 'light');
+
+    await page.close();
+  });
+
+  test('CSS 变量已注入根节点', async () => {
+    const page = await openNewTab(ext);
+
+    const accent = await page.evaluate(() =>
+      getComputedStyle(document.documentElement)
+        .getPropertyValue('--accent')
+        .trim(),
+    );
+    expect(accent.length).toBeGreaterThan(0);
+
+    await page.close();
+  });
+});

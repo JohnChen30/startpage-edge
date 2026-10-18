@@ -1,7 +1,8 @@
-# 极简立体搜索起始页（Edge / Chromium 扩展）
+# 极简聚合搜索起始页（Edge / Chromium 扩展）
 
-替换浏览器新标签页的起始页扩展。核心是一条**立体基线**承担搜索框的角色：
-文字浮在线条上方，随输入字数呼吸式拉伸，没有传统矩形输入框的边框。
+液态玻璃的构建设计，主要的功能是可以再输入检索词之后通过一次点击直接跳转特定搜索引擎搜索
+支持选择性导入浏览器的收藏标签作为快捷方式，可以构建多个快捷方式页面，壁纸支持必应壁纸和本地导入
+<img width="2864" height="1536" alt="image" src="https://github.com/user-attachments/assets/e6cec6af-52e3-4720-ab4b-4665e4785993" />
 
 技术栈：**WXT + Svelte 5（runes）+ TypeScript + Vite + Zustand + 原生 CSS**，
 构建目标为 **Manifest V3**，适配 Edge / Chromium。

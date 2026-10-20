@@ -5,7 +5,7 @@
 
 支持的内置搜索引擎：**必应、谷歌、百度、DeepSeek、千问、B站、油管、小红书、知乎、豆瓣、有道词典**。
 
-<img width="2864" height="1536" alt="image" src="https://github.com/user-attachments/assets/e6cec6af-52e3-4720-ab4b-4665e4785993" />
+<img width="2864" height="1536" alt="image" src="https://github.com/user-attachments/assets/044af5bf-149c-463e-9a58-730d6718a1ef" />
 
 技术栈：**WXT + Svelte 5（runes）+ TypeScript + Vite + Zustand + 原生 CSS**，
 构建目标为 **Manifest V3**，适配 Edge / Chromium。

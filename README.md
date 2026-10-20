@@ -2,6 +2,9 @@
 
 液态玻璃的构建设计，主要的功能是可以再输入检索词之后通过一次点击直接跳转特定搜索引擎搜索
 支持选择性导入浏览器的收藏标签作为快捷方式，可以构建多个快捷方式页面，壁纸支持必应壁纸和本地导入
+
+支持的内置搜索引擎：**必应、谷歌、百度、DeepSeek、千问、B站、油管、小红书、知乎、豆瓣、有道词典**。
+
 <img width="2864" height="1536" alt="image" src="https://github.com/user-attachments/assets/e6cec6af-52e3-4720-ab4b-4665e4785993" />
 
 技术栈：**WXT + Svelte 5（runes）+ TypeScript + Vite + Zustand + 原生 CSS**，

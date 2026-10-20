@@ -149,6 +149,31 @@ export const BUILTIN_ENGINES: SearchEngine[] = [
     builtin: true,
     order: 7,
   },
+  // ── 社区 / 工具类站点 ──
+  {
+    id: 'zhihu',
+    name: '知乎',
+    urlTemplate: 'https://www.zhihu.com/search?type=content&q=%s',
+    icon: faviconApiUrl('zhihu.com'),
+    builtin: true,
+    order: 8,
+  },
+  {
+    id: 'douban',
+    name: '豆瓣',
+    urlTemplate: 'https://www.douban.com/search?q=%s',
+    icon: faviconApiUrl('douban.com'),
+    builtin: true,
+    order: 9,
+  },
+  {
+    id: 'youdao',
+    name: '有道词典',
+    urlTemplate: 'https://dict.youdao.com/result?word=%s&lang=en',
+    icon: faviconApiUrl('youdao.com'),
+    builtin: true,
+    order: 10,
+  },
 ];
 
 export const DEFAULT_ENGINE_ID = 'bing';
@@ -173,10 +198,11 @@ export const DEFAULT_ENGINE_ID = 'bing';
  * v5：下线 Yandex 与神马，恢复千问（Logo 同样走 favicon.im）。
  * v6：新增 B站 / 油管两个视频搜索引擎（普通搜索引擎，不提供以图搜图能力）。
  * v7：新增小红书搜索（普通搜索引擎）。
+ * v8：新增知乎 / 豆瓣 / 有道词典。
  *
  * ⚠️ 与 types 里的 SCHEMA_VERSION 是两回事：那个管导入导出文件格式，别混用。
  */
-export const BUILTIN_ENGINE_SYNC_VERSION = 7;
+export const BUILTIN_ENGINE_SYNC_VERSION = 8;
 
 /** UI 允许的引擎数量区间 */
 export const ENGINE_LIMITS = { min: 1, max: 12 } as const;
